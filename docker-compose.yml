@@ -1,0 +1,163 @@
+# The homework system. `make up` starts it; `make down` stops it and deletes all data.
+#
+# Start-up order:
+#   kafka ──healthy──> kafka-init (creates topics from infra/kafka/topics.txt) ──┐
+#   timescaledb ──healthy──> migrate (alembic upgrade head) ──────────────────────┴──> reader, writer, api
+#
+# From your machine: API on http://localhost:8000, simulator on ws://localhost:8080/market/v1/ticks/ws/,
+# Kafka on localhost:29092, TimescaleDB on localhost:5432 (candlekeeper / candlekeeper, database ticks),
+# reader metrics on http://localhost:9101/metrics, writer metrics on http://localhost:9102/metrics.
+# If a port is taken on your machine, set API_PORT, SIMULATOR_PORT, KAFKA_PORT or POSTGRES_PORT;
+# `make check` and `make verify` read API_PORT and SIMULATOR_PORT too.
+#
+# simulator, kafka, kafka-init, timescaledb and migrate are infrastructure: keep their names and
+# don't change them (see CONTRACT.md). reader, writer and api are yours: change, merge or add
+# services as your design needs; only `api` on port 8000 is required.
+
+name: candlekeeper-homework
+
+x-app: &app
+  build: .
+  environment: &app-environment
+    SIMULATOR_URL: ws://simulator:8080/market/v1/ticks/ws/
+    KAFKA_BOOTSTRAP: kafka:9092
+    DATABASE_URL: postgresql://candlekeeper:candlekeeper@timescaledb:5432/ticks
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  depends_on:
+    kafka-init: { condition: service_completed_successfully }
+    migrate: { condition: service_completed_successfully }
+  restart: unless-stopped
+
+services:
+  # ---- Infrastructure (don't change) -----------------------------------------------
+
+  simulator:
+    build: .
+    command: ["python3", "-m", "simulator"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    environment:
+      MODE: ${MODE:-live}
+      RATE: ${RATE:-200}
+      SYMBOL_COUNT: ${SYMBOL_COUNT:-20}
+      REPLAY_START: ${REPLAY_START:-}
+      REPLAY_LOOP: ${REPLAY_LOOP:-false}
+      SEED: ${SEED:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FAULTS: ${FAULTS:-none}
+      FAULT_DISCONNECT_EVERY_S: ${FAULT_DISCONNECT_EVERY_S:-}
+      FAULT_DUPLICATE_RATE: ${FAULT_DUPLICATE_RATE:-}
+      FAULT_DUPLICATE_MAX_DELAY_MS: ${FAULT_DUPLICATE_MAX_DELAY_MS:-}
+      FAULT_OUT_OF_ORDER_RATE: ${FAULT_OUT_OF_ORDER_RATE:-}
+      FAULT_OUT_OF_ORDER_MAX_DELAY_MS: ${FAULT_OUT_OF_ORDER_MAX_DELAY_MS:-}
+      FAULT_OUT_OF_ORDER_FLAG_RATE: ${FAULT_OUT_OF_ORDER_FLAG_RATE:-}
+      FAULT_NULL_PRICE_RATE: ${FAULT_NULL_PRICE_RATE:-}
+      FAULT_MALFORMED_RATE: ${FAULT_MALFORMED_RATE:-}
+      FAULT_BURST_EVERY_S: ${FAULT_BURST_EVERY_S:-}
+      FAULT_BURST_DURATION_S: ${FAULT_BURST_DURATION_S:-}
+      FAULT_BURST_RATE: ${FAULT_BURST_RATE:-}
+    ports:
+      - "${SIMULATOR_PORT:-8080}:8080"
+
+  kafka:
+    image: apache/kafka:4.1.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:${KAFKA_PORT:-29092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # The image's default is /tmp/kraft-combined-logs, outside the volume.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Topics come only from infra/kafka/topics.txt.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "${KAFKA_PORT:-29092}:29092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  kafka-init:
+    image: apache/kafka:4.1.0
+    depends_on:
+      kafka: { condition: service_healthy }
+    volumes:
+      - ./infra/kafka:/infra:ro
+    entrypoint: ["/bin/bash", "/infra/create-topics.sh", "/infra/topics.txt"]
+    restart: "no"
+
+  timescaledb:
+    image: timescale/timescaledb:2.32.0-pg18
+    environment:
+      POSTGRES_USER: candlekeeper
+      POSTGRES_PASSWORD: candlekeeper
+      POSTGRES_DB: ticks
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U candlekeeper -d ticks"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      # PostgreSQL 18 images keep data in /var/lib/postgresql/18/docker; mount the parent.
+      - timescale-pg18-data:/var/lib/postgresql
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql://candlekeeper:candlekeeper@timescaledb:5432/ticks
+    # Your revisions from the working tree, so `make migrate` doesn't need a rebuilt image.
+    # As root, because the mounted files keep your machine's owner and may be private to you.
+    user: root
+    volumes:
+      - ./alembic.ini:/opt/app/alembic.ini:ro
+      - ./migrations:/opt/app/migrations:ro
+    depends_on:
+      timescaledb: { condition: service_healthy }
+    restart: "no"
+
+  # ---- Your services ----------------------------------------------------------------
+
+  reader:
+    <<: *app
+    command: ["python3", "-m", "app.reader"]
+    environment:
+      <<: *app-environment
+      METRICS_PORT: "9100"
+    ports:
+      - "9101:9100"
+
+  writer:
+    <<: *app
+    command: ["python3", "-m", "app.writer"]
+    environment:
+      <<: *app-environment
+      METRICS_PORT: "9100"
+    ports:
+      - "9102:9100"
+
+  api:
+    <<: *app
+    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+volumes:
+  kafka-data:
+  timescale-pg18-data:
