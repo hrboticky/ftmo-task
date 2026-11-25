@@ -1,4 +1,4 @@
-.PHONY: all lint format ruff mypy test up down logs replay migrate check verify
+.PHONY: all lint format ruff mypy test test-integration up down logs replay migrate check verify
 
 all: lint test
 
@@ -17,12 +17,15 @@ mypy:
 	uv run mypy .
 
 test:
-	uv run pytest -vvv tests
+	uv run --locked pytest -vvv -m 'not integration' tests
+
+test-integration:
+	uv run --locked pytest -vvv -m integration tests
 
 # ---- The system ------------------------------------------------------------------
 
 up:
-	docker compose up -d --build
+	docker compose up -d --build --wait
 
 down:
 	docker compose down -v
