@@ -1,8 +1,1 @@
-# Kafka topics for your system. This file is yours: change names, partitions and config.
-# `kafka-init` creates every topic listed here before your services start (see CONTRACT.md).
-#
-# One topic per line:   name   partitions   [config: key=value,key=value]
-# Lines starting with # are ignored. Topics are never deleted or changed once created;
-# to change one, rename it or run `make down` (which deletes all data).
-
-ticks.raw   1
+ticks.raw 1 cleanup.policy=delete,retention.ms=86400000,message.timestamp.type=LogAppendTime

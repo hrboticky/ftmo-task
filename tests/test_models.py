@@ -17,3 +17,9 @@ def test_parses_the_protocol_example() -> None:
     assert tick.payload.bid is None
     assert tick.payload.ask == 1.16073
     assert tick.timestamp == datetime(2026, 3, 25, 8, 18, 1, 19_000, tzinfo=UTC)
+
+
+def test_mixed_case_hexadecimal_message_id_round_trips_verbatim() -> None:
+    tick = Tick.model_validate_json(RAW.replace(b"B2EA3ECA", b"b2Ea3EcA"))
+    assert tick.message_id == "b2Ea3EcA"
+    assert Tick.model_validate_json(tick.model_dump_json()).message_id == "b2Ea3EcA"

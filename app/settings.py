@@ -5,10 +5,12 @@ from typing import Final
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.models import InstrumentName
+
 
 class Instrument(BaseModel):
-    source: str
-    symbol: str
+    source: InstrumentName
+    symbol: InstrumentName
 
 
 # The instruments in the replay fixture. CONTRACT.md requires subscribing to all of them.

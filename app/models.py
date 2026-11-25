@@ -1,33 +1,31 @@
-"""The tick message from the simulator's WebSocket."""
+from typing import Annotated, Literal
 
-from typing import Literal
+from datetime import UTC, datetime, timedelta
 
-from datetime import UTC, datetime
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-from pydantic import BaseModel, ConfigDict, Field
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+type InstrumentName = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[^\x00]+$")]
 
 
 class TickPayload(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, strict=True)
 
-    symbol: str
-    bid: float | None
-    ask: float | None
+    symbol: InstrumentName
+    bid: FiniteFloat | None
+    ask: FiniteFloat | None
 
 
 class Tick(BaseModel):
-    """A `symbolTick` message. Parse with `Tick.model_validate_json(raw)`."""
+    model_config = ConfigDict(frozen=True, strict=True, validate_by_name=True, serialize_by_alias=True)
 
-    model_config = ConfigDict(frozen=True, validate_by_name=True, serialize_by_alias=True)
-
-    message_id: str = Field(alias="messageId", pattern=r"^[0-9A-F]{8}$")
-    timestamp_msc: int = Field(alias="timestampMsc")
+    message_id: str = Field(alias="messageId", pattern=r"^[0-9A-Fa-f]{8}$")
+    timestamp_msc: int = Field(alias="timestampMsc", ge=-62_135_596_800_000, le=253_402_300_799_999)
     event_type: Literal["symbolTick"] = Field(alias="eventType")
-    source: str
+    source: InstrumentName
     may_be_out_of_sequence: bool = Field(alias="mayBeOutOfSequence")
     payload: TickPayload
 
     @property
     def timestamp(self) -> datetime:
-        """When the price changed at the platform, in UTC."""
-        return datetime.fromtimestamp(self.timestamp_msc / 1000, tz=UTC)
+        return EPOCH + timedelta(milliseconds=self.timestamp_msc)
