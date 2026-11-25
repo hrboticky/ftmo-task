@@ -1,30 +1,20 @@
-# Your decisions, in a form our checks can read. `make check` validates this file.
-# Explain the reasoning in DESIGN.md (section "Ambiguities and how I handled them");
-# this file records only the outcome.
-
 candles:
-  # Which price the candles use.                       bid | ask | mid
-  price_basis: TODO
-  # A tick whose chosen price is null.                 skip | other_side | last_value
-  null_price: TODO
-  # Ticks that arrive after their candle may have been served.
+  price_basis: bid
+  null_price: skip
   late_ticks:
-    policy: TODO                                     # include | exclude_after
-    lateness_seconds: 0                              # for exclude_after: tick-time seconds after the candle closes
-  # Ticks flagged mayBeOutOfSequence: true.            same_as_other_ticks | drop
-  out_of_sequence: TODO
-  # Intervals with no ticks.                           omit | null | carry_forward
-  empty_intervals: TODO
+    policy: exclude_after
+    lateness_seconds: 1500
+  out_of_sequence: same_as_other_ticks
+  empty_intervals: omit
 
 services:
-  # Compose services that read the simulator's WebSocket.
-  ws_readers: [TODO]
-  # Compose services that write ticks to the database. Our checks restart these, and the
-  # database, while a replay runs.
-  db_writers: [TODO]
+  ws_readers: [reader]
+  db_writers: [writer]
 
-# For each stage of your pipeline: its Prometheus endpoint, as reached from your machine,
-# serving last_tick_processed_timestamp_seconds{stage="<stage>"}.
 metrics:
-  - stage: TODO        # e.g. reader
-    url: TODO          # e.g. http://localhost:9101/metrics
+  - stage: ws_received
+    url: http://localhost:9101/metrics
+  - stage: reader
+    url: http://localhost:9101/metrics
+  - stage: writer
+    url: http://localhost:9102/metrics
