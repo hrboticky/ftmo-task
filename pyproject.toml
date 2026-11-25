@@ -9,7 +9,7 @@ dependencies = [
     "aiokafka>=0.15,<0.16",
     "alembic>=1.16,<2",
     "asyncpg>=0.30,<0.33",
-    "fastapi>=0.162.0,<0.163",
+    "fastapi>=0.163.2,<0.164",
     "prometheus-client>=0.26,<0.27",
     "pydantic-settings>=2.14.1,<3",
     # Read by our checks (`make check`, `make verify`); keep it.
@@ -86,7 +86,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["aiokafka.*", "asyncpg.*"]
+module = ["aiokafka.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

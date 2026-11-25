@@ -21,7 +21,6 @@ x-app: &app
   environment: &app-environment
     SIMULATOR_URL: ws://simulator:8080/market/v1/ticks/ws/
     KAFKA_BOOTSTRAP: kafka:9092
-    DATABASE_URL: postgresql://candlekeeper:candlekeeper@timescaledb:5432/ticks
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
   depends_on:
     kafka-init: { condition: service_completed_successfully }
@@ -137,27 +136,44 @@ services:
   reader:
     <<: *app
     command: ["python3", "-m", "app.reader"]
+    stop_grace_period: 15s
     environment:
       <<: *app-environment
       METRICS_PORT: "9100"
     ports:
-      - "9101:9100"
+      - "${READER_METRICS_PORT:-9101}:9100"
 
   writer:
     <<: *app
     command: ["python3", "-m", "app.writer"]
+    stop_grace_period: 25s
     environment:
       <<: *app-environment
+      DATABASE_URL: &application-database postgresql://candlekeeper:candlekeeper@timescaledb:5432/ticks
       METRICS_PORT: "9100"
     ports:
-      - "9102:9100"
+      - "${WRITER_METRICS_PORT:-9102}:9100"
 
   api:
     <<: *app
-    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--limit-concurrency", "100"]
+    environment:
+      <<: *app-environment
+      DATABASE_URL: *application-database
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
     ports:
       - "${API_PORT:-8000}:8000"
 
 volumes:
   kafka-data:
   timescale-pg18-data:
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
